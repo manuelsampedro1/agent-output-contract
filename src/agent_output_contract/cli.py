@@ -10,6 +10,8 @@ from typing import Any
 
 
 OUTCOME_FIELDS = ["status", "verdict", "result"]
+CHECK_OUTCOME_FIELDS = ["status", "verdict", "result", "outcome"]
+CHECK_NAME_FIELDS = ["name", "check", "command", "id"]
 PASSING_OUTCOMES = {"ok", "pass", "passed", "success", "ready", "clean"}
 NON_PASSING_OUTCOMES = {"fail", "failed", "error", "blocked", "needs-review", "needs_review", "partial"}
 KNOWN_OUTCOMES = PASSING_OUTCOMES | NON_PASSING_OUTCOMES
@@ -31,6 +33,7 @@ class FileReport:
     status: str
     outcome: str
     score: int | None
+    check_count: int
     issues: list[str]
     warnings: list[str]
 
@@ -62,6 +65,10 @@ def normalized_outcome(value: Any) -> str:
 
 def present_outcome_fields(data: dict[str, Any]) -> list[str]:
     return [field for field in OUTCOME_FIELDS if field in data]
+
+
+def present_check_outcome_fields(data: dict[str, Any]) -> list[str]:
+    return [field for field in CHECK_OUTCOME_FIELDS if field in data]
 
 
 def is_placeholder(value: Any) -> bool:
@@ -100,16 +107,61 @@ def audit_sensitive_values(path: str, data: dict[str, Any], warnings: list[str])
                 warnings.append(f"{path}: local absolute path found at `{key_path}`.")
 
 
-def audit_file(path: Path) -> FileReport:
+def has_check_name(check: dict[str, Any]) -> bool:
+    return any(isinstance(check.get(field), str) and check[field].strip() for field in CHECK_NAME_FIELDS)
+
+
+def audit_checks(path: str, data: dict[str, Any], outcome: str, require_checks: bool, issues: list[str]) -> int:
+    if require_checks and "checks" not in data:
+        issues.append(f"{path}: `checks` must include at least one check when --require-checks is used.")
+        return 0
+    checks = data.get("checks")
+    if not isinstance(checks, list):
+        return 0
+    if require_checks and not checks:
+        issues.append(f"{path}: `checks` must include at least one check when --require-checks is used.")
+    for index, check in enumerate(checks, 1):
+        if not isinstance(check, dict):
+            if require_checks:
+                issues.append(f"{path}: check {index} must be an object with a name and outcome.")
+            continue
+        if require_checks and not has_check_name(check):
+            issues.append(f"{path}: check {index} must include a non-empty name, check, command, or id.")
+        check_outcome_fields = present_check_outcome_fields(check)
+        if len(check_outcome_fields) != 1:
+            if require_checks:
+                issues.append(
+                    f"{path}: check {index} must include exactly one outcome field from "
+                    f"{', '.join(CHECK_OUTCOME_FIELDS)}."
+                )
+            continue
+        check_outcome = normalized_outcome(check[check_outcome_fields[0]])
+        if check_outcome not in KNOWN_OUTCOMES:
+            issues.append(f"{path}: check {index} has unrecognized outcome `{check[check_outcome_fields[0]]}`.")
+            continue
+        if outcome in PASSING_OUTCOMES and check_outcome in NON_PASSING_OUTCOMES:
+            issues.append(f"{path}: passing output must not include non-passing check {index}.")
+    return len(checks)
+
+
+def audit_file(path: Path, require_checks: bool = False) -> FileReport:
     path_text = str(path)
     issues: list[str] = []
     warnings: list[str] = []
     data, read_error = read_json(path)
     if read_error is not None:
-        return FileReport(path_text, "fail", "invalid", None, [f"{path_text}: {read_error}."], [])
+        return FileReport(path_text, "fail", "invalid", None, 0, [f"{path_text}: {read_error}."], [])
 
     if not isinstance(data, dict):
-        return FileReport(path_text, "fail", "invalid", None, [f"{path_text}: top-level JSON value must be an object."], [])
+        return FileReport(
+            path_text,
+            "fail",
+            "invalid",
+            None,
+            0,
+            [f"{path_text}: top-level JSON value must be an object."],
+            [],
+        )
 
     if is_placeholder(data.get("schema_version")):
         issues.append(f"{path_text}: missing or placeholder `schema_version`.")
@@ -154,13 +206,14 @@ def audit_file(path: Path) -> FileReport:
     if outcome in PASSING_OUTCOMES and blocking_items:
         issues.append(f"{path_text}: passing outcome must not include blocking issues or missing evidence.")
 
+    check_count = audit_checks(path_text, data, outcome, require_checks, issues)
     audit_sensitive_values(path_text, data, warnings)
     status = "pass" if not issues else "fail"
-    return FileReport(path_text, status, outcome, normalized_score, issues, warnings)
+    return FileReport(path_text, status, outcome, normalized_score, check_count, issues, warnings)
 
 
-def audit(paths: list[Path]) -> ContractReport:
-    file_reports = [audit_file(path) for path in paths]
+def audit(paths: list[Path], require_checks: bool = False) -> ContractReport:
+    file_reports = [audit_file(path, require_checks=require_checks) for path in paths]
     issues = [issue for report in file_reports for issue in report.issues]
     warnings = [warning for report in file_reports for warning in report.warnings]
     score = max(0, 100 - len(issues) * 12 - len(warnings) * 4)
@@ -183,6 +236,12 @@ def render_text(report: ContractReport) -> str:
         f"Score: {report.score}/100",
         "",
     ]
+    for file_report in report.files:
+        lines.append(
+            f"- {file_report.path}: {file_report.status}, outcome={file_report.outcome}, "
+            f"checks={file_report.check_count}"
+        )
+    lines.append("")
     if report.issues:
         lines.append("Issues:")
         lines.extend(f"- {issue}" for issue in report.issues)
@@ -202,6 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_parser = subparsers.add_parser("check", help="check one or more JSON outputs")
     check_parser.add_argument("outputs", nargs="+", help="JSON output file(s)")
     check_parser.add_argument("--format", choices=["text", "json"], default="text")
+    check_parser.add_argument("--require-checks", action="store_true", help="require non-empty structured checks.")
 
     return parser
 
@@ -213,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command != "check":
         parser.error("unknown command")
 
-    report = audit([Path(output) for output in args.outputs])
+    report = audit([Path(output) for output in args.outputs], require_checks=args.require_checks)
     if args.format == "json":
         print(json.dumps(asdict(report), indent=2))
     else:
@@ -223,4 +283,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

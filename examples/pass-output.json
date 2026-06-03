@@ -4,6 +4,15 @@
   "score": 100,
   "issues": [],
   "warnings": [],
+  "checks": [
+    {
+      "name": "unit tests",
+      "status": "pass"
+    },
+    {
+      "name": "lint",
+      "status": "pass"
+    }
+  ],
   "summary": "All required checks passed."
 }
-

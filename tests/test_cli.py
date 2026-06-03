@@ -18,6 +18,14 @@ PASS_OUTPUT = {
     "warnings": [],
 }
 
+PASS_OUTPUT_WITH_CHECKS = {
+    **PASS_OUTPUT,
+    "checks": [
+        {"name": "unit tests", "status": "pass"},
+        {"name": "lint", "status": "pass"},
+    ],
+}
+
 
 class AgentOutputContractTests(unittest.TestCase):
     def write_json(self, directory: str, name: str, value: object) -> Path:
@@ -33,6 +41,60 @@ class AgentOutputContractTests(unittest.TestCase):
 
         self.assertEqual(report.status, "pass")
         self.assertEqual(report.issues, [])
+        self.assertEqual(report.check_count, 0)
+
+    def test_valid_output_with_checks_passes_required_checks_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.write_json(tmp, "output.json", PASS_OUTPUT_WITH_CHECKS)
+
+            report = audit_file(path, require_checks=True)
+
+        self.assertEqual(report.status, "pass")
+        self.assertEqual(report.issues, [])
+        self.assertEqual(report.check_count, 2)
+
+    def test_required_checks_gate_blocks_missing_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.write_json(tmp, "output.json", PASS_OUTPUT)
+
+            report = audit_file(path, require_checks=True)
+
+        self.assertEqual(report.status, "fail")
+        self.assertIn(
+            f"{path}: `checks` must include at least one check when --require-checks is used.",
+            report.issues,
+        )
+
+    def test_required_checks_gate_requires_structured_check_objects(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            value = {**PASS_OUTPUT, "checks": ["make test"]}
+            path = self.write_json(tmp, "output.json", value)
+
+            report = audit_file(path, require_checks=True)
+
+        self.assertEqual(report.status, "fail")
+        self.assertIn(f"{path}: check 1 must be an object with a name and outcome.", report.issues)
+
+    def test_required_checks_gate_requires_check_name_and_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            value = {**PASS_OUTPUT, "checks": [{"status": "pass"}, {"name": "unit tests"}]}
+            path = self.write_json(tmp, "output.json", value)
+
+            report = audit_file(path, require_checks=True)
+
+        self.assertEqual(report.status, "fail")
+        self.assertIn(f"{path}: check 1 must include a non-empty name, check, command, or id.", report.issues)
+        self.assertTrue(any("check 2 must include exactly one outcome field" in issue for issue in report.issues))
+
+    def test_passing_output_cannot_include_non_passing_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            value = {**PASS_OUTPUT, "checks": [{"name": "unit tests", "status": "fail"}]}
+            path = self.write_json(tmp, "output.json", value)
+
+            report = audit_file(path)
+
+        self.assertEqual(report.status, "fail")
+        self.assertIn(f"{path}: passing output must not include non-passing check 1.", report.issues)
 
     def test_missing_schema_version_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -131,16 +193,17 @@ class AgentOutputContractTests(unittest.TestCase):
 
     def test_json_cli_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            path = self.write_json(tmp, "output.json", PASS_OUTPUT)
+            path = self.write_json(tmp, "output.json", PASS_OUTPUT_WITH_CHECKS)
             stdout = io.StringIO()
 
             with contextlib.redirect_stdout(stdout):
-                code = main(["check", str(path), "--format", "json"])
+                code = main(["check", str(path), "--format", "json", "--require-checks"])
 
             self.assertEqual(code, 0)
             parsed = json.loads(stdout.getvalue())
             self.assertEqual(parsed["status"], "pass")
             self.assertEqual(parsed["score"], 100)
+            self.assertEqual(parsed["files"][0]["check_count"], 2)
 
     def test_text_renderer_lists_issues(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -154,4 +217,3 @@ class AgentOutputContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -13,6 +13,9 @@ Agent stacks increasingly pass JSON between gates, ledgers, review packets, and 
 - `score`, when present, is an integer from `0` to `100`.
 - Issue, warning, blocker, and missing-evidence fields are lists.
 - Passing outputs do not carry blocking findings.
+- Optional `--require-checks` mode requires structured checks and reports
+  `check_count`.
+- Passing outputs cannot include non-passing checks.
 - Failing or blocked outputs include actionable evidence.
 - Obvious secret-looking values and local absolute paths are flagged before public artifacts reuse the output.
 
@@ -53,6 +56,12 @@ JSON output for automation:
 PYTHONPATH=src python3 -m agent_output_contract check examples/pass-output.json --format json
 ```
 
+Require structured checks before a passing output can be trusted:
+
+```sh
+PYTHONPATH=src python3 -m agent_output_contract check examples/pass-output.json --require-checks
+```
+
 ## Example Output
 
 ```text
@@ -60,6 +69,8 @@ Agent Output Contract
 Status: pass
 Files: 1
 Score: 100/100
+
+- examples/pass-output.json: pass, outcome=pass, checks=2
 
 No blocking issues found.
 ```

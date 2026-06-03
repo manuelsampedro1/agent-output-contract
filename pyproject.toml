@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-output-contract"
-version = "0.1.0"
+version = "0.2.0"
 description = "Validate coding-agent JSON outputs before automation trusts them as evidence."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -30,4 +30,3 @@ agent-output-contract = "agent_output_contract.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
