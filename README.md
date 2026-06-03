@@ -2,7 +2,7 @@
 
 Validate JSON outputs from coding-agent workflow tools before automation trusts them as evidence.
 
-Agent stacks increasingly pass JSON between gates, ledgers, review packets, and CI jobs. A malformed or ambiguous output can make downstream automation treat weak evidence as a pass, hide blocking findings, or fail without actionable context. `agent-output-contract` is a small local checker for that boundary.
+Agent stacks increasingly pass JSON between gates, ledgers, review packets, and CI jobs. A malformed or ambiguous output can cause downstream automation to treat weak evidence as a pass, hide blocking findings, or fail without actionable context. `agent-output-contract` is a small local checker for that boundary.
 
 ## What It Checks
 
@@ -38,19 +38,19 @@ PYTHONPATH=src python3 -m agent_output_contract check examples/pass-output.json
 Check one output:
 
 ```sh
-agent-output-contract check output.json
+PYTHONPATH=src python3 -m agent_output_contract check examples/pass-output.json
 ```
 
 Check multiple outputs:
 
 ```sh
-agent-output-contract check reports/*.json
+PYTHONPATH=src python3 -m agent_output_contract check examples/pass-output.json examples/fail-output.json
 ```
 
 JSON output for automation:
 
 ```sh
-agent-output-contract check output.json --format json
+PYTHONPATH=src python3 -m agent_output_contract check examples/pass-output.json --format json
 ```
 
 ## Example Output
@@ -99,4 +99,3 @@ make lint
 make build
 make smoke
 ```
-
