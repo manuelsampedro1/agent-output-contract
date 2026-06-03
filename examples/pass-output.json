@@ -1,0 +1,9 @@
+{
+  "schema_version": "example-gate.v1",
+  "status": "pass",
+  "score": 100,
+  "issues": [],
+  "warnings": [],
+  "summary": "All required checks passed."
+}
+
